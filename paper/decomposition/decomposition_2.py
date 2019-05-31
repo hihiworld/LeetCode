@@ -36,8 +36,17 @@ time = [[2,3,2,3,1,1,3,3,3,2,2,1],
         [2,6,2,3,1,1,3,3,2,2,2,1]]
 
 from docplex.mp.model import Model
-
+import json
 model = Model()
+
+def load_sol_json(filename):
+    fp = json.load(open(filename, 'r'))['CPLEXSolution']['variables']
+    P = {}
+    for f in fp:
+        if "X" in f['name']:
+            P[f['name']] = int(1)
+    return P
+
 def C_oppo(i):
     if i in AR:
         return AL
@@ -45,32 +54,28 @@ def C_oppo(i):
         return AR
     else:
         return set()
-var_list_X = [(i,p,m,k) for i in tasks for p in products for m in stations for k in sides]
+
 var_list_U = [(i,j,h,q) for i in tasks for j in products for h in tasks for q in products]
-X = model.binary_var_dict(var_list_X, name='X')
-Z = model.binary_var_matrix(tasks,tasks, name='Z')
+
 Y = model.binary_var_matrix(sequences, products, name='Y')
 C = model.integer_var_cube(tasks, products,stations, name='CompletionTime')
 U = model.integer_var_dict(var_list_U, name='U')
 A = model.integer_var_matrix(products, stations, name='ArrivalTime')
 D = model.integer_var_matrix(products, stations, name='DepartTime')
 C_max = model.integer_var(lb=0, name='C_max')
-W = model.integer_var(lb=0, name='W')
+
 M = 99999
 
-
-# ct2
+filename = r'C:\Users\root\PycharmProjects\LeetCode\paper\decomposition\solution.json'
+last_sol = load_sol_json(filename)
+print(last_sol['X_1_1_1_0'])
+list={}
 for i in tasks:
-    if i in AL:
-        for j in products:
-            model.add_constraint(
-                model.sum(X[i,j, m, 0] for m in stations) == 1, ctname='ct2_{}_{}'.format(i,j))
-# ct3
-for i in tasks:
-    if i in AR:
-        for j in products:
-            model.add_constraint(
-                model.sum(X[i,j, m, 1] for m in stations) == 1, ctname='ct3_{}_{}'.format(i,j))
+    for j in products:
+        for m in stations:
+            for k in sides:
+                if 'X_{}_{}_{}_{}'.format(i,j,m,k) in last_sol:
+                    list[(i,j,m,k)] = int(1)
 
 for i in tasks:
     for j in products:
@@ -85,105 +90,111 @@ for i in tasks:
 for i in  tasks:
     for j in products:
         for m in stations:
-            model.add_constraint(C[i,j,m] <= M * model.sum(X[i,j, m, k] for k in side_task[i-1]))
-# 不同station上的有前后次序关系的task应满足
-for i in list(set(tasks).difference(set(P0))):
-    for r in P[i]:
-        for j in products:
-            for m in stations:
-                for g in stations:
-                    model.add_constraint(C[i,j,m]-C[r,j,g] + M*(1-model.sum(X[i,j,m,k] for k in side_task[i-1]))
-                                     +M*(1-model.sum(X[r,j,g,k] for k in side_task[r-1]))
-                                     >= time[j-1][i-1])
-
-# 不同产品间task的关系，不能同时加工
-for j in products:
-    for q in products:
-        if j != q:
-            for i in tasks:
-                for h in tasks:
-                    for m in stations:
-                        for k in list(set(side_task[i-1]).intersection(set(side_task[h-1]))):
-                            model.add_constraint(C[i,j,m]-C[h,q,m] + M * (1-X[i,j,m,k])+M*(1-X[h,q,m,k]) + M*U[i,j,h,q]
-                                         >= time[j-1][i-1])
-for j in products:
-    for q in products:
-        if j != q:
-            for i in tasks:
-                for h in tasks:
-                    for m in stations:
-                        for k in list(set(side_task[i-1]).intersection(set(side_task[h-1]))):
-                            model.add_constraint(C[h,q,m]-C[i,j,m] + M * (1-X[i,j,m,k])+M*(1-X[h,q,m,k]) + M*(1-U[i,j,h,q])
-                                         >= time[j-1][h-1])
-
-
-
-# 同一产品内的task之间的约束，不能同时加工
-for i in list(set(tasks).difference(set(P0))):
-    for r in P[i]:
-        for j in products:
-            for m in stations:
-                model.add_constraint(C[i,j,m]-C[r,j,m] + M*(1-model.sum(X[i,j,m,k] for k in side_task[i-1]))
-                                     +M*(1-model.sum(X[r,j,m,k] for k in side_task[r-1]))
-                                     >= time[j-1][i-1])
-
-for i in tasks:
-    r = list(set(tasks).difference(set(set(Pa[i]).union(set(Sa[i])).union(C_oppo(i)))))
-    for h in r:
-        if i < h:
-            for m in stations:
-                for k in list(set(side_task[i-1]).intersection(set(side_task[h-1]))):
-                    for j in products:
-                        model.add_constraint(C[h,j,m]-C[i,j,m] + M*(1-X[i,j,m,k])
-                                     +M*(1-X[h,j,m,k])
-                                         +M*(1-U[i,j,h,j])
-                                     >= time[j-1][h-1])
-
-for i in tasks:
-    r = list(set(tasks).difference(set(set(Pa[i]).union(set(Sa[i])).union(C_oppo(i)))))
-    for h in r:
-        if i<h:
-            for m in stations:
-                for k in list(set(side_task[i-1]).intersection(set(side_task[h-1]))):
-                    for j in products:
-                        model.add_constraint(C[i,j,m]-C[h,j,m] + M*(1-X[i,j,m,k])
-                                     +M*(1-X[h,j,m,k])
-                                        +M*U[i,j,h,j]
-                                     >= time[j-1][i-1])
-
-for s in sequences:
-    model.add_constraint(model.sum(Y[s,j] for j in products) == 1)
-for j in products:
-    model.add_constraint(model.sum(Y[s,j] for s in sequences) == 1)
-
-for s in sequences:
-    for j in products:
-        for q in products:
-            if s > 1 and q != j:
-                for m in stations:
-                    model.add_constraint(D[j,m]-A[q,m] <= M*(2-Y[s-1,j]-Y[s,q]))
-for m in stations:
-    if m > 1:
-        for j in products:
-            model.add_constraint(A[j,m] >= D[j,m-1])
-
-for i in tasks:
-    for j in products:
-        for m in stations:
-            model.add_constraint(A[j,m]-C[i,j,m] <= time[j-1][i-1]*model.sum(X[i,j,m,k] for k in side_task[i-1])
-                                 + M*(1-model.sum(X[i,j,m,k] for k in side_task[i-1])))
-
-for j in products:
-    for m in stations:
-        for i in tasks:
-            model.add_constraint(D[j, m] >= C[i,j,m])
-
-for j in products:
-    for m in stations:
-        model.add_constraint(D[j, m] <= C_max)
-
-model.add_constraint(C_max>=7)
-
-model.minimize(C_max)
-sol = model.solve()
-print(sol)
+            b = list[(i,j,m,k) for k in side_task[i-1]]
+            model.add_constraint(C[i,j,m] <= M * model.sum())
+            print(model.add_constraint(C[i,j,m] <= M * model.sum_vars(last_sol['X_{}_{}_{}_{}'.format(i,j,m,k)] for k in side_task[i-1])))
+# # 不同station上的有前后次序关系的task应满足
+# for i in list(set(tasks).difference(set(P0))):
+#     for r in P[i]:
+#         for j in products:
+#             for m in stations:
+#                 for g in stations:
+#                     model.add_constraint(C[i,j,m]-C[r,j,g] + M*(1-model.sum(last_sol['X_{}_{}_{}_{}'.format(i,j,m,k)] for k in side_task[i-1]))
+#                                      +M*(1-model.sum(last_sol['X_{}_{}_{}_{}'.format(r, j, g, k)] for k in side_task[r-1]))
+#                                      >= time[j-1][i-1])
+#
+# # 不同产品间task的关系，不能同时加工
+# for j in products:
+#     for q in products:
+#         if j != q:
+#             for i in tasks:
+#                 for h in tasks:
+#                     for m in stations:
+#                         for k in list(set(side_task[i-1]).intersection(set(side_task[h-1]))):
+#                             model.add_constraint(C[i,j,m]-C[h,q,m] +
+#                                                  M * (1-last_sol['X_{}_{}_{}_{}'.format(i,j,m,k)])+
+#                                                  M*(1-last_sol['X_{}_{}_{}_{}'.format(h,q,m,k)]) +
+#                                                  M*U[i,j,h,q]
+#                                          >= time[j-1][i-1])
+# for j in products:
+#     for q in products:
+#         if j != q:
+#             for i in tasks:
+#                 for h in tasks:
+#                     for m in stations:
+#                         for k in list(set(side_task[i-1]).intersection(set(side_task[h-1]))):
+#                             model.add_constraint(C[h,q,m]-C[i,j,m] + M * (1-last_sol['X_{}_{}_{}_{}'.format(i,j,m,k)])+
+#                                                  M*(1-last_sol['X_{}_{}_{}_{}'.format(h,q,m,k)]) + M*(1-U[i,j,h,q])
+#                                          >= time[j-1][h-1])
+#
+#
+#
+# # 同一产品内的task之间的约束，不能同时加工
+# for i in list(set(tasks).difference(set(P0))):
+#     for r in P[i]:
+#         for j in products:
+#             for m in stations:
+#                 model.add_constraint(C[i,j,m]-C[r,j,m] + M*(1-model.sum(last_sol['X_{}_{}_{}_{}'.format(i,j,m,k)] for k in side_task[i-1]))
+#                                      +M*(1-model.sum(last_sol['X_{}_{}_{}_{}'.format(r,j,m,k)] for k in side_task[r-1]))
+#                                      >= time[j-1][i-1])
+#
+# for i in tasks:
+#     r = list(set(tasks).difference(set(set(Pa[i]).union(set(Sa[i])).union(C_oppo(i)))))
+#     for h in r:
+#         if i < h:
+#             for m in stations:
+#                 for k in list(set(side_task[i-1]).intersection(set(side_task[h-1]))):
+#                     for j in products:
+#                         model.add_constraint(C[h,j,m]-C[i,j,m] + M*(1-last_sol['X_{}_{}_{}_{}'.format(i,j,m,k)])
+#                                      +M*(1-last_sol['X_{}_{}_{}_{}'.format(h,j,m,k)])
+#                                          +M*(1-U[i,j,h,j])
+#                                      >= time[j-1][h-1])
+#
+# for i in tasks:
+#     r = list(set(tasks).difference(set(set(Pa[i]).union(set(Sa[i])).union(C_oppo(i)))))
+#     for h in r:
+#         if i<h:
+#             for m in stations:
+#                 for k in list(set(side_task[i-1]).intersection(set(side_task[h-1]))):
+#                     for j in products:
+#                         model.add_constraint(C[i,j,m]-C[h,j,m] + M*(1-last_sol['X_{}_{}_{}_{}'.format(i,j,m,k)])
+#                                      +M*(1-last_sol['X_{}_{}_{}_{}'.format(i,j,m,k)])
+#                                         +M*U[i,j,h,j]
+#                                      >= time[j-1][i-1])
+#
+# for s in sequences:
+#     model.add_constraint(model.sum(Y[s,j] for j in products) == 1)
+# for j in products:
+#     model.add_constraint(model.sum(Y[s,j] for s in sequences) == 1)
+#
+# for s in sequences:
+#     for j in products:
+#         for q in products:
+#             if s > 1 and q != j:
+#                 for m in stations:
+#                     model.add_constraint(D[j,m]-A[q,m] <= M*(2-Y[s-1,j]-Y[s,q]))
+# for m in stations:
+#     if m > 1:
+#         for j in products:
+#             model.add_constraint(A[j,m] >= D[j,m-1])
+#
+# for i in tasks:
+#     for j in products:
+#         for m in stations:
+#             model.add_constraint(A[j,m]-C[i,j,m] <= time[j-1][i-1]*model.sum(last_sol['X_{}_{}_{}_{}'.format(i,j,m,k)] for k in side_task[i-1])
+#                                  + M*(1-model.sum(last_sol['X_{}_{}_{}_{}'.format(i,j,m,k)] for k in side_task[i-1])))
+#
+# for j in products:
+#     for m in stations:
+#         for i in tasks:
+#             model.add_constraint(D[j, m] >= C[i,j,m])
+#
+# for j in products:
+#     for m in stations:
+#         model.add_constraint(D[j, m] <= C_max)
+#
+# model.add_constraint(C_max>=14)
+#
+# model.minimize(C_max)
+# sol = model.solve()
+# print(sol)
