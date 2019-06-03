@@ -162,11 +162,6 @@ for s in sequences:
             if s > 1 and q != j:
                 for m in stations:
                     model.add_constraint(D[j,m]-A[q,m] <= M*(2-Y[s-1,j]-Y[s,q]))
-for m in stations:
-    if m > 1:
-        for j in products:
-            model.add_constraint(A[j,m] >= D[j,m-1])
-
 for i in tasks:
     for j in products:
         for m in stations:
